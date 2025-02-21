@@ -30,7 +30,7 @@ sudo ./run.sh
 To stop the program, press Ctrl + C.
 ## Settings
 Default settings are the same as in basic-eth2-node-monitor.
-If further customization is needed, you can modify the conf.py file.
+If further customization is needed, you can modify the config.py file.
 
 Most variables in that file are self-explanatory, but a few will be explicitly explained:
 
