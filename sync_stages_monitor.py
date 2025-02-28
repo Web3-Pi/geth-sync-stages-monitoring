@@ -115,6 +115,7 @@ def search_all_patterns_in_logs(logs):
         return patterns_found
 
 def add_log(queue, new_log, timestamp):
+        print("add_log", end=" ")
         if len(queue) >= MAX_QUEUE_LEN:
                 popped_log = queue.pop(0)
                 popped_log_patterns = search_all_patterns_in_logs(popped_log)
