@@ -125,45 +125,62 @@ def add_log(queue, new_log, timestamp):
         if (len(popped_log_patterns) > 0 and len(new_log_patterns) > 0):
                 if(new_log_patterns[0] == popped_log_patterns[0]):
                         queue.append(new_log)
+                        print("new=removed")
                         return # new log has the same pattern as removed one
         if (len(new_log_patterns) == 0 and len(popped_log_patterns) == 0):
                 queue.append(new_log)
+                print("no_pattern")
                 return # no pattern found in both
 
         if len(popped_log_patterns) > 0:
+                print("1", end=" ")
                 if not is_pattern_in_logs(queue, popped_log_patterns[0]):
+                        print("2", end=" ")
                         if not are_other_patterns_in_logs(queue, popped_log_patterns[0]):
+                            print("3", end=" ")
                             for pattern, stage in SYNC_STAGES.items():
                                     stage_finished = False
                                     if re.search(pattern, popped_log_patterns[0]):
+                                            print("4", end=" ")
                                             stage_finished = True
                                     else:
                                         for p in stage[2:]:
                                                 if re.search(p, popped_log_patterns[0]):
+                                                        print("5", end=" ")
                                                         stage_finished = True
                                     if stage_finished:
+                                            print("6", end=" ")
                                             finish_timestamp = timestamp_from_log(popped_log)
                                             stage[0] = False
                                             write_to_influx(stage=f'{stage[1]}', time=finish_timestamp, stage_type="finish")
                                             write_state_to_influx(timestamp)
 
         if len(new_log_patterns) > 0:
+                print("a", end=" ")
                 if not is_pattern_in_logs(queue, new_log_patterns[0]):
+                        print("b", end=" ")
                         for pattern, stage in SYNC_STAGES.items():
                                 start_stage = False
                                 if re.search(pattern, new_log_patterns[0]):
+                                        print("c", end=" ")
                                         if not stage[0]:
+                                            print("d", end=" ")
                                             start_stage = True
                                 else:
+                                     print("e", end=" ")
                                      for p in stage[2:]:
                                              if re.search(p, new_log_patterns[0]):
+                                                 print("f", end=" ")
                                                  if not stage[0]:
+                                                     print("g", end=" ")
                                                      start_stage = True
                                 if start_stage:
+                                    print("h", end=" ")
                                     stage[0] = True
                                     write_to_influx(f'{stage[1]}', time=timestamp, stage_type="start")
                                     write_state_to_influx(timestamp)
         queue.append(new_log)
+        print("")
         return
 
 def write_to_influx(stage, time, stage_type):
@@ -181,7 +198,6 @@ def write_to_influx(stage, time, stage_type):
         }
     ]
     safe_write_to_influx(json_body)
-    print(f"{time} Zapisano etap synchronizacji: {stage}")
 
 def write_state_to_influx(time):
     json_body = []
@@ -208,6 +224,7 @@ def monitor_geth_logs(queue):
     process = subprocess.Popen(["journalctl", "-u", "w3p_geth", "-f"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     for line in iter(process.stdout.readline, ''):
+        print("read line from geth journal")
         for pattern, stage in SYNC_STAGES.items():
             if re.search(pattern, line):
                 match = TIMESTAMP_PATTERN.search(line)
