@@ -1,9 +1,8 @@
 import re
 import subprocess
-import threading
 import time
 from influxdb_client import InfluxDBClient
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from influxdb_client.client.write_api import WriteOptions
 from tzlocal import get_localzone
 from zoneinfo import ZoneInfo
@@ -115,7 +114,6 @@ def search_all_patterns_in_logs(logs):
         return patterns_found
 
 def add_log(queue, new_log, timestamp):
-        print("add_log", end=" ")
         if len(queue) >= MAX_QUEUE_LEN:
                 popped_log = queue.pop(0)
                 popped_log_patterns = search_all_patterns_in_logs(popped_log)
@@ -126,62 +124,47 @@ def add_log(queue, new_log, timestamp):
         if (len(popped_log_patterns) > 0 and len(new_log_patterns) > 0):
                 if(new_log_patterns[0] == popped_log_patterns[0]):
                         queue.append(new_log)
-                        print("new=removed")
                         return # new log has the same pattern as removed one
         if (len(new_log_patterns) == 0 and len(popped_log_patterns) == 0):
                 queue.append(new_log)
-                print("no_pattern")
                 return # no pattern found in both
 
         if len(popped_log_patterns) > 0:
-                print("1", end=" ")
                 if not is_pattern_in_logs(queue, popped_log_patterns[0]):
-                        print("2", end=" ")
                         if not are_other_patterns_in_logs(queue, popped_log_patterns[0]):
-                            print("3", end=" ")
                             for pattern, stage in SYNC_STAGES.items():
                                     stage_finished = False
                                     if re.search(pattern, popped_log_patterns[0]):
-                                            print("4", end=" ")
                                             stage_finished = True
                                     else:
                                         for p in stage[2:]:
                                                 if re.search(p, popped_log_patterns[0]):
-                                                        print("5", end=" ")
                                                         stage_finished = True
                                     if stage_finished:
-                                            print("6", end=" ")
                                             finish_timestamp = timestamp_from_log(popped_log)
                                             stage[0] = False
+                                            print(f"Finished {stage[1]}")
                                             write_to_influx(stage=f'{stage[1]}', time=finish_timestamp, stage_type="finish")
                                             write_state_to_influx(timestamp)
 
         if len(new_log_patterns) > 0:
-                print("a", end=" ")
                 if not is_pattern_in_logs(queue, new_log_patterns[0]):
-                        print("b", end=" ")
                         for pattern, stage in SYNC_STAGES.items():
                                 start_stage = False
                                 if re.search(pattern, new_log_patterns[0]):
-                                        print("c", end=" ")
                                         if not stage[0]:
-                                            print("d", end=" ")
                                             start_stage = True
                                 else:
-                                     print("e", end=" ")
                                      for p in stage[2:]:
                                              if re.search(p, new_log_patterns[0]):
-                                                 print("f", end=" ")
                                                  if not stage[0]:
-                                                     print("g", end=" ")
                                                      start_stage = True
                                 if start_stage:
-                                    print("h", end=" ")
                                     stage[0] = True
+                                    print(f"Started {stage[1]}")
                                     write_to_influx(f'{stage[1]}', time=timestamp, stage_type="start")
                                     write_state_to_influx(timestamp)
         queue.append(new_log)
-        print("")
         return
 
 def write_to_influx(stage, time, stage_type):
@@ -221,35 +204,39 @@ def write_state_to_influx(time):
         })
     safe_write_to_influx(json_body)
 
-def monitor_geth_logs(queue):
-    process = subprocess.Popen(["journalctl", "-u", "w3p_geth", "-f"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+def get_journal_logs(since_time):
+    try:
+        result = subprocess.run(
+            ["journalctl", "-u", "w3p_geth", "--since", since_time], 
+            capture_output=True, text=True, check=True
+        )
+        return result.stdout.splitlines()
+    except subprocess.CalledProcessError as e:
+        print(f"Error while fetching logs: {e}")
+        return []
 
-    for line in iter(process.stdout.readline, ''):
-        print("read line from geth journal")
-        for pattern, stage in SYNC_STAGES.items():
-            if re.search(pattern, line):
-                match = TIMESTAMP_PATTERN.search(line)
-                if match:
-                        timestamp = timestamp_from_log(line)
-                        add_log(queue, line.strip(), timestamp)
-                else:
-                      print(f"No timestamp found in log: {line}")
-                break
-
-def periodic_state_writer():
+def monitor_logs_with_intervals(queue):
+    local_tz = get_localzone()
+    local_timestamp = datetime.now(local_tz)
+    last_checked_time = local_timestamp
     while True:
-        current_utc_time = datetime.now(timezone.utc)
-        write_state_to_influx(current_utc_time)
+        since_time = last_checked_time.strftime("%Y-%m-%d %H:%M:%S")
+        latest_logs = get_journal_logs(since_time)
+
+        for line in latest_logs:
+            match = TIMESTAMP_PATTERN.search(line)
+            if match:
+                timestamp = timestamp_from_log(line)
+                add_log(queue, line.strip(), timestamp)
+
+        local_tz = get_localzone()
+        local_timestamp = datetime.now(local_tz)
+        last_checked_time = local_timestamp
+
+        write_state_to_influx(last_checked_time)
+
         time.sleep(DELAY_BETWEEN_STATE_SAVES)
 
-def start_monitoring():
-    state_writer_thread = threading.Thread(target=periodic_state_writer)
-    state_writer_thread.daemon = True
-    state_writer_thread.start()
-
-    queue = []
-    monitor_geth_logs(queue)
-
 client, write_api = connect_to_influx()
-
-start_monitoring()
+queue = []
+monitor_logs_with_intervals(queue)
