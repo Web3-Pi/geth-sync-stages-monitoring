@@ -2,7 +2,7 @@ import re
 import subprocess
 import time
 from influxdb_client import InfluxDBClient
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from influxdb_client.client.write_api import WriteOptions
 from tzlocal import get_localzone
 from zoneinfo import ZoneInfo
@@ -46,6 +46,15 @@ def connect_to_influx():
     except Exception as e:
         print('Failed to connect to InfluxDB: {e}')
         return None, None
+
+offset_us = 1
+def get_unique_timestamp(base_time):
+    global offset_us
+    unique_timestamp = base_time + timedelta(microseconds=offset_us)
+    offset_us += 1
+    if offset_us > 1000:
+          offset_us = 1
+    return unique_timestamp
 
 def safe_write_to_influx(data, max_retries=9):
     global client, write_api
@@ -174,7 +183,7 @@ def write_to_influx(stage, time, stage_type):
             "tags": {
                 "service": "w3p_geth"
             },
-            "time": time,
+            "time": get_unique_timestamp(time),
             "fields": {
                 "stage": stage,
                 "type": stage_type
@@ -197,7 +206,7 @@ def write_state_to_influx(time):
             "tags": {
                 "service": "w3p_geth"
             },
-            "time": time,
+            "time": get_unique_timestamp(time),
             "fields": {
                 f"state_{stage[1]}": state_to_write
             }
